@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PlacementPro</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--ink:#1c2430;--mute:#6b7685;--line:#dde3ea;--pri:#1f5eff;--ok:#16a34a;--bad:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#10141b;--card:#181e28;--ink:#e8edf4;--mute:#93a0b2;--line:#2a3342;--pri:#5b8cff}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}h2{font-size:17px;margin:0 0 10px}
+main{max-width:980px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:14px}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+label{font-size:13px;color:var(--mute)}
+button{background:var(--pri);color:#fff;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit}
+button.alt{background:transparent;color:var(--pri);border:1px solid var(--pri)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);font-size:12px;margin-right:4px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
+#msg{position:fixed;bottom:16px;right:16px;max-width:360px;padding:12px 16px;border-radius:8px;color:#fff;display:none;white-space:pre-line}
+.hide{display:none}.mute{color:var(--mute)}
+</style></head><body>
+<header><h1>PlacementPro</h1><div id="who"></div></header>
+<main>
+<section id="auth" class="card">
+  <h2>Sign in</h2>
+  <div class="grid">
+    <div><label>Email</label><input id="email" type="email"></div>
+    <div><label>Password</label><input id="pw" type="password"></div>
+  </div><br>
+  <button onclick="login()">Sign in</button>
+  <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+  <h2>Create account</h2>
+  <div class="grid">
+    <div><label>Name</label><input id="rn"></div>
+    <div><label>Email</label><input id="re" type="email"></div>
+    <div><label>Password (min 6)</label><input id="rp" type="password"></div>
+    <div><label>Role</label><select id="rr"><option>student</option><option>recruiter</option></select></div>
+  </div><br>
+  <button class="alt" onclick="register()">Create account</button>
+  <p class="mute">Placement officer demo login: admin@placementpro.com / Admin@123</p>
+</section>
+<section id="app" class="hide"><nav id="nav"></nav><div id="view"></div></section>
+</main>
+<div id="msg"></div>
+<script>
+const $=id=>document.getElementById(id);
+let token=localStorage.getItem("pp_token"),user=null;
+function say(t,ok=true){const m=$("msg");m.textContent=t;m.style.background=ok?"var(--ok)":"var(--bad)";m.style.display="block";setTimeout(()=>m.style.display="none",4000)}
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+async function api(path,method="GET",body=null,form=false){
+  const h={};if(token)h.Authorization="Bearer "+token;
+  let b;if(body){if(form){b=new URLSearchParams(body)}else{h["Content-Type"]="application/json";b=JSON.stringify(body)}}
+  const r=await fetch(path,{method,headers:h,body:b});
+  if(r.status===204)return null;
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){let e=d.detail;
+    if(Array.isArray(e))e=e.map(x=>x.loc.slice(1).join(".")+": "+x.msg).join("\n");
+    else if(e&&e.reasons)e=e.message+":\n- "+e.reasons.join("\n- ");
+    say(e||"Request failed",false);throw new Error(e)}
+  return d}
+async function login(){
+  try{const d=await api("/auth/login","POST",{username:$("email").value,password:$("pw").value},true);
+  token=d.access_token;localStorage.setItem("pp_token",token);start()}catch(e){}}
+async function register(){
+  try{await api("/auth/register","POST",{name:$("rn").value,email:$("re").value,password:$("rp").value,role:$("rr").value});
+  say("Account created. Sign in now.")}catch(e){}}
+function logout(){token=null;localStorage.removeItem("pp_token");location.reload()}
+async function start(){
+  try{user=await api("/auth/me")}catch(e){return logout()}
+  $("auth").classList.add("hide");$("app").classList.remove("hide");
+  $("who").innerHTML=esc(user.name)+' <span class="tag">'+user.role+'</span> <button class="alt" onclick="logout()">Sign out</button>';
+  const tabs={student:[["Jobs",jobsView],["My applications",myApps],["Profile",profile]],
+    recruiter:[["My postings",jobsView],["Post a job",postJob]],
+    admin:[["All jobs",jobsView],["Students",students],["Stats",stats]]}[user.role];
+  $("nav").innerHTML="";
+  tabs.forEach(([n,f],i)=>{const b=document.createElement("button");b.className="alt";b.textContent=n;b.onclick=f;$("nav").appendChild(b);if(i===0)f()})}
+async function jobsView(){
+  $("view").innerHTML=`<div class="card"><div class="grid">
+   <div><label>Search</label><input id="fq"></div>
+   <div><label>Type</label><select id="ft"><option value="">Any</option><option>job</option><option>internship</option></select></div>
+   <div><label>Location</label><input id="fl"></div>
+   <div><label>Min package (LPA)</label><input id="fp" type="number"></div>
+   <div style="align-self:end"><button onclick="loadJobs()">Search</button></div></div></div><div id="jobs"></div>`;
+  loadJobs()}
+async function loadJobs(){
+  const p=new URLSearchParams();
+  if($("fq").value)p.set("q",$("fq").value);if($("ft").value)p.set("job_type",$("ft").value);
+  if($("fl").value)p.set("location",$("fl").value);if($("fp").value)p.set("min_package",$("fp").value);
+  p.set("limit",50);
+  const jobs=await api("/jobs?"+p);
+  $("jobs").innerHTML=jobs.length?jobs.map(j=>`<div class="card"><div class="row"><div>
+   <h2>${esc(j.title)} <span class="mute">at ${esc(j.company)}</span></h2>
+   <span class="tag">${j.job_type}</span><span class="tag">${esc(j.location)}</span><span class="tag">${j.package_lpa} LPA</span>
+   <span class="tag">CGPA ≥ ${j.min_cgpa}</span><span class="tag">Branches: ${esc(j.allowed_branches)}</span>
+   <span class="tag">Max backlogs ${j.max_backlogs}</span><span class="tag">Deadline ${j.deadline}</span>
+   ${user.role!=="student"?`<span class="tag">${j.is_approved?"Approved":"Pending approval"}</span>`:""}
+   <p>${esc(j.description)}</p></div><div>${jobActions(j)}</div></div></div>`).join(""):'<p class="mute">No jobs match. Change the filters.</p>'}
+function jobActions(j){
+  if(user.role==="student")return `<button class="alt" onclick="elig(${j.id})">Check eligibility</button> <button onclick="applyTo(${j.id})">Apply</button>`;
+  if(user.role==="recruiter")return `<button class="alt" onclick="applicants(${j.id})">Applicants</button> <button class="alt" onclick="delJob(${j.id})">Delete</button>`;
+  return (j.is_approved?"":`<button onclick="approve(${j.id})">Approve</button> `)+`<button class="alt" onclick="applicants(${j.id})">Applicants</button> <button class="alt" onclick="delJob(${j.id})">Delete</button>`}
+async function elig(id){try{const r=await api(`/jobs/${id}/eligibility`);say(r.eligible?"You are eligible":"Not eligible:\n- "+r.reasons.join("\n- "),r.eligible)}catch(e){}}
+async function applyTo(id){try{await api("/applications","POST",{job_id:id});say("Application submitted")}catch(e){}}
+async function approve(id){try{await api(`/jobs/${id}/approve`,"PATCH");say("Job approved");loadJobs()}catch(e){}}
+async function delJob(id){if(!confirm("Delete this job?"))return;try{await api(`/jobs/${id}`,"DELETE");say("Job deleted");loadJobs()}catch(e){}}
+async function myApps(){
+  const a=await api("/applications/me");
+  $("view").innerHTML=a.length?a.map(x=>`<div class="card row"><div>Job #${x.job_id} <span class="tag">${x.status}</span>
+   <span class="mute">${x.created_at.slice(0,10)}</span></div>${x.status==="applied"?`<button class="alt" onclick="withdraw(${x.id})">Withdraw</button>`:""}</div>`).join(""):'<p class="mute">No applications yet. Browse jobs and apply.</p>'}
+async function withdraw(id){try{await api(`/applications/${id}`,"DELETE");say("Application withdrawn");myApps()}catch(e){}}
+async function profile(){
+  let p={};try{p=await api("/students/me/profile")}catch(e){}
+  $("view").innerHTML=`<div class="card"><h2>Your profile</h2><div class="grid">
+   <div><label>Branch (e.g. CSE)</label><input id="pb" value="${esc(p.branch)}"></div>
+   <div><label>CGPA (0-10)</label><input id="pc" type="number" step="0.01" value="${p.cgpa??""}"></div>
+   <div><label>Graduation year</label><input id="py" type="number" value="${p.graduation_year??""}"></div>
+   <div><label>Backlogs</label><input id="pk" type="number" value="${p.backlogs??0}"></div>
+   <div><label>Skills</label><input id="ps" value="${esc(p.skills)}"></div>
+   <div><label>Resume URL</label><input id="pr" value="${esc(p.resume_url)}"></div></div><br>
+   <button onclick="saveProfile()">Save profile</button></div>`}
+async function saveProfile(){
+  try{await api("/students/me/profile","PUT",{branch:$("pb").value,cgpa:+$("pc").value,graduation_year:+$("py").value,
+   backlogs:+$("pk").value,skills:$("ps").value,resume_url:$("pr").value||null});say("Profile saved")}catch(e){}}
+function postJob(){
+  $("view").innerHTML=`<div class="card"><h2>Post a job or internship</h2><div class="grid">
+   <div><label>Title</label><input id="jt"></div><div><label>Company</label><input id="jc"></div>
+   <div><label>Type</label><select id="jy"><option>job</option><option>internship</option></select></div>
+   <div><label>Location</label><input id="jl"></div><div><label>Package (LPA)</label><input id="jp" type="number"></div>
+   <div><label>Min CGPA</label><input id="jm" type="number" step="0.1" value="0"></div>
+   <div><label>Allowed branches (CSE,IT or ALL)</label><input id="jb" value="ALL"></div>
+   <div><label>Max backlogs</label><input id="jk" type="number" value="0"></div>
+   <div><label>Deadline</label><input id="jd" type="date"></div></div>
+   <label>Description</label><textarea id="jx" rows="3"></textarea><br><br>
+   <button onclick="saveJob()">Post job</button><p class="mute">New jobs need approval from the placement officer before students see them.</p></div>`}
+async function saveJob(){
+  try{await api("/jobs","POST",{title:$("jt").value,company:$("jc").value,description:$("jx").value,job_type:$("jy").value,
+   location:$("jl").value,package_lpa:+$("jp").value,min_cgpa:+$("jm").value,allowed_branches:$("jb").value,
+   max_backlogs:+$("jk").value,deadline:$("jd").value});say("Job posted. Waiting for approval.");start()}catch(e){}}
+const NEXT={applied:["shortlisted","rejected"],shortlisted:["interview_scheduled","rejected"],interview_scheduled:["selected","rejected"],selected:[],rejected:[]};
+async function applicants(id){
+  const a=await api(`/applications/job/${id}`);
+  $("view").innerHTML=`<h2>Applicants for job #${id}</h2>`+(a.length?a.map(x=>`<div class="card row"><div>Application #${x.id}, student #${x.student_id}
+   <span class="tag">${x.status}</span></div><div>${NEXT[x.status].map(s=>`<button class="alt" onclick="setStatus(${x.id},'${s}',${id})">${s.replace("_"," ")}</button> `).join("")}</div></div>`).join(""):'<p class="mute">No applicants yet.</p>')}
+async function setStatus(aid,s,jid){try{await api(`/applications/${aid}/status`,"PATCH",{status:s});say("Status updated");applicants(jid)}catch(e){}}
+async function students(){
+  const s=await api("/students?limit=100");
+  $("view").innerHTML=s.length?`<div class="card">${s.map(x=>`<div>Student #${x.user_id}: ${esc(x.branch)}, CGPA ${x.cgpa}, backlogs ${x.backlogs}, ${esc(x.skills)}</div>`).join("")}</div>`:'<p class="mute">No student profiles yet.</p>'}
+async function stats(){
+  const s=await api("/admin/stats");
+  $("view").innerHTML=`<div class="grid">${Object.entries(s).map(([k,v])=>`<div class="card"><div class="mute">${k}</div><h1>${v}</h1></div>`).join("")}</div>`}
+if(token)start();
+</script></body></html>
